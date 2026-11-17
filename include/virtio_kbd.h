@@ -13,6 +13,7 @@ struct mouse_state {
 };
 
 void virtio_kbd_init(void);
+uint32_t virtio_kbd_device_count(void);
 int virtio_kbd_getc_nonblock(void);
 void virtio_mouse_get_state(struct mouse_state *out);
 void virtio_mouse_set_pos(int32_t x, int32_t y);

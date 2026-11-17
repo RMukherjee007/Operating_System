@@ -6,6 +6,7 @@
 void shell_run(void);
 void shell_exec_line(const char *line);
 bool shell_is_poweroff_requested(void);
+void shell_request_poweroff(void);
 
 /* Command groups */
 bool cmd_linux_dispatch(int argc, char **argv);

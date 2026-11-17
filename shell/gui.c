@@ -547,7 +547,7 @@ static void gui_run_shell_cmd(const char *cmd, bool focus_terminal) {
         return;
     }
     if (strcmp(cmd, "exit") == 0 || strcmp(cmd, "quit") == 0) {
-        gui_running = false;
+        gui_append_term("[Terminal] Session closed. Use menus to shut down or launch apps.\n");
         return;
     }
     if (strcmp(cmd, "gui") == 0 || strcmp(cmd, "desktop") == 0) {
@@ -1033,7 +1033,7 @@ struct menu_def {
 };
 
 static const struct menu_def mac_menus[5] = {
-    { "[*]",     6,   34, 4, { "About FulmenOS...", "Run EL0 Trap Test", "Run Deadlock Test", "Exit GUI      ^Q" } },
+    { "[*]",     6,   34, 4, { "About FulmenOS...", "Run EL0 Trap Test", "Run Deadlock Test", "Shut Down     ^Q" } },
     { "File",    42,  48, 6, { "New C Program", "New C++ Program", "Open Finder", "Open CodePad", "Save CodePad  ^S", "Delete Selected" } },
     { "Edit",    92,  48, 4, { "Insert C Demo", "Insert C++ Demo", "Clear CodePad", "Clear Terminal" } },
     { "View",    142, 48, 5, { "Show All Windows", "Reset Layout", "Theme: Mac Blue", "Theme: Sys7 Gray", "Theme: Bondi Teal" } },
@@ -1045,7 +1045,7 @@ static void gui_trigger_menu_item(int m, int item) {
         if (item == 0) gui_focus_window(WIN_ABOUT);
         else if (item == 1) gui_run_shell_cmd("el0_test", true);
         else if (item == 2) gui_run_shell_cmd("deadlock_test", true);
-        else if (item == 3) gui_running = false;
+        else if (item == 3) { gui_run_shell_cmd("poweroff", false); }
     } else if (m == 1) { /* File */
         if (item == 0 || item == 1) {
             bool is_cpp = (item == 1);
@@ -1121,7 +1121,7 @@ static void gui_draw_menubar(void) {
              sched_policy_name(sched_get_policy()), secs / 60UL, secs % 60UL);
     gui_draw_text_fit(608, 3, 14, right, MAC_BLACK, MAC_MENUBAR_BG, false);
 
-    gui_draw_mac_button(732, 2, 62, 18, "Exit", false);
+    gui_draw_mac_button(732, 2, 62, 18, "Shut Down", false);
 }
 
 static void gui_draw_open_menu_popup(void) {
@@ -1347,8 +1347,8 @@ static void handle_gui_key(int ch, int *dragging_win) {
     }
 
     /* Global Ctrl shortcuts */
-    if (ch == 0x11) { /* Ctrl+Q: Exit GUI */
-        gui_running = false;
+    if (ch == 0x11) { /* Ctrl+Q: Shut Down */
+        gui_run_shell_cmd("poweroff", false);
         return;
     }
     if (ch == 0x13) { /* Ctrl+S: Save CodePad */
@@ -1505,7 +1505,7 @@ void cmd_gui(int argc, char **argv) {
         return;
     }
 
-    kprintf(ANSI_CYAN "[GUI]" ANSI_RESET " Launching FulmenOS Classic Macintosh Desktop... (Ctrl+Q or top-right [Exit] to return)\n");
+    kprintf(ANSI_CYAN "[GUI]" ANSI_RESET " Launching FulmenOS Classic Macintosh Desktop...\n");
 
     backbuf = (uint32_t *)kmalloc(FB_WIDTH * FB_HEIGHT * FB_BPP);
 
@@ -1522,8 +1522,8 @@ void cmd_gui(int argc, char **argv) {
     gui_reset_layout();
     editor_load_default();
     gui_append_term("Welcome to FulmenOS Classic Mac Desktop\n");
-    gui_append_term("Type commands, edit C/C++ in CodePad, or\n");
-    gui_append_term("click icons/menus. Exit: Ctrl+Q / [Exit]\n");
+    gui_append_term("Type commands below, edit C/C++ in CodePad,\n");
+    gui_append_term("or use menus/icons. Shut Down: Ctrl+Q\n");
 
     virtio_mouse_set_pos(400, 300);
     struct mouse_state ms;
@@ -1587,7 +1587,7 @@ void cmd_gui(int argc, char **argv) {
             /* 1. Top menu bar click */
             if (ms.y < GUI_MENUBAR_H) {
                 if (pt_in_rect(ms.x, ms.y, 732, 2, 62, 18)) {
-                    gui_running = false;
+                    gui_run_shell_cmd("poweroff", false);
                 } else {
                     int clicked_m = -1;
                     for (int i = 0; i < 5; i++) {

@@ -496,3 +496,7 @@ void virtio_mouse_set_pos(int32_t x, int32_t y) {
     mouse_y = clamp_i32(y, 0, 599);
     irq_restore(flags);
 }
+
+uint32_t virtio_kbd_device_count(void) {
+    return num_input_devs;
+}

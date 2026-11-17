@@ -1,5 +1,7 @@
 #include "shell.h"
 #include "uart.h"
+#include "fb.h"
+#include "virtio_kbd.h"
 #include "vfs.h"
 #include "elf.h"
 #include "minic.h"
@@ -184,6 +186,13 @@ void shell_exec_line(const char *raw_line) {
 void shell_run(void) {
     char line[SHELL_MAX_LINE];
     char cwd_path[VFS_PATH_MAX];
+
+    /* Boot directly into GUI desktop if framebuffer and interactive input are active */
+    if (fb_is_active() && virtio_kbd_device_count() > 0) {
+        char *gui_argv[] = { "gui", NULL };
+        cmd_gui(1, gui_argv);
+        /* GUI exited — fall through to CLI shell as fallback */
+    }
 
     while (!poweroff_requested) {
         vfs_get_path(vfs_get_cwd(), cwd_path, sizeof(cwd_path));
