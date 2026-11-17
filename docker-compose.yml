@@ -1,0 +1,17 @@
+services:
+  fulmenos:
+    build: .
+    container_name: fulmenos-dev
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    ports:
+      - "5900:5900"
+      - "6080:6080"
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "make build &&
+               websockify --web /usr/share/novnc 6080 localhost:5900 >/tmp/novnc.log 2>&1 &
+               qemu-system-aarch64 -M virt,gic-version=2 -cpu cortex-a72 -m 256M -nic none
+               -kernel build/fulmenos-qemu.elf -device ramfb -vnc :0 -serial mon:stdio"
