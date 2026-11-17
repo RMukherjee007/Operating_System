@@ -204,6 +204,7 @@ vm-setup:
 
 test: $(KERNEL_ELF) $(KERNEL_BIN)
 	python3 scripts/verify_os.py
+	python3 scripts/verify_gui.py
 
 clean:
 	rm -rf $(BUILD_DIR)

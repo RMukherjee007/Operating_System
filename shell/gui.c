@@ -380,19 +380,19 @@ static void gui_toggle_zoom(int wid) {
 static void gui_reset_layout(void) {
     wins[WIN_ABOUT] = (struct gui_win){
         WIN_ABOUT, "About This Macintosh",
-        10, 32, 306, 224, 10, 32, 306, 224, true, false
+        60, 60, 320, 240, 60, 60, 320, 240, false, false
     };
     wins[WIN_FINDER] = (struct gui_win){
         WIN_FINDER, "FulmenHD",
-        10, 266, 306, 320, 10, 266, 306, 320, true, false
+        40, 50, 350, 380, 40, 50, 350, 380, false, false
     };
     wins[WIN_EDITOR] = (struct gui_win){
         WIN_EDITOR, "SimpleText - CodePad",
-        324, 32, 376, 294, 324, 32, 376, 294, true, false
+        100, 45, 520, 480, 100, 45, 520, 480, false, false
     };
     wins[WIN_TERM] = (struct gui_win){
-        WIN_TERM, "MPW Shell - Terminal",
-        324, 336, 376, 250, 324, 336, 376, 250, true, false
+        WIN_TERM, "FulmenOS Terminal - TUI CLI",
+        50, 36, 630, 520, 50, 36, 630, 520, false, false
     };
     z_order[0] = WIN_ABOUT;
     z_order[1] = WIN_FINDER;
@@ -433,17 +433,27 @@ static void gui_draw_window_chrome(const struct gui_win *w, bool is_active) {
         for (int32_t p = 4; p <= 14; p += 2) {
             gui_fill_rect(w->x + 4, w->y + p, w->w - 8, 1, MAC_PLAT_STRIPE);
         }
-        /* Close box [x] & Zoom box [+] */
-        gui_fill_rect(w->x + 6, w->y + 3, 14, 14, tb_bg);
-        gui_fill_rect(w->x + 7, w->y + 4, 12, 12, MAC_WHITE);
-        gui_outline(w->x + 7, w->y + 4, 12, 12, MAC_BLACK);
-        gui_fill_rect(w->x + 10, w->y + 9, 6, 2, MAC_PLAT_DARK);
-
-        gui_fill_rect(w->x + w->w - 20, w->y + 3, 14, 14, tb_bg);
-        gui_fill_rect(w->x + w->w - 19, w->y + 4, 12, 12, MAC_WHITE);
-        gui_outline(w->x + w->w - 19, w->y + 4, 12, 12, MAC_BLACK);
-        gui_outline(w->x + w->w - 19, w->y + 4, 7, 7, MAC_BLACK);
     }
+
+    /* Left-side Closing Button [x] - always visible on left */
+    int32_t cb_x = w->x + 7;
+    int32_t cb_y = w->y + 4;
+    uint32_t cb_bg = is_active ? 0x00E05252U : MAC_PLAT_LIGHT;
+    gui_fill_rect(cb_x, cb_y, 12, 12, cb_bg);
+    gui_outline(cb_x, cb_y, 12, 12, MAC_BLACK);
+    uint32_t x_col = is_active ? MAC_WHITE : MAC_PLAT_DARK;
+    gui_fill_rect(cb_x + 3, cb_y + 3, 2, 2, x_col);
+    gui_fill_rect(cb_x + 7, cb_y + 3, 2, 2, x_col);
+    gui_fill_rect(cb_x + 5, cb_y + 5, 2, 2, x_col);
+    gui_fill_rect(cb_x + 3, cb_y + 7, 2, 2, x_col);
+    gui_fill_rect(cb_x + 7, cb_y + 7, 2, 2, x_col);
+
+    /* Right-side Zoom Button [+] */
+    int32_t zb_x = w->x + w->w - 19;
+    int32_t zb_y = w->y + 4;
+    gui_fill_rect(zb_x, zb_y, 12, 12, MAC_WHITE);
+    gui_outline(zb_x, zb_y, 12, 12, MAC_BLACK);
+    gui_outline(zb_x, zb_y, 7, 7, MAC_BLACK);
 
     /* Centered title with clean Platinum backing behind text */
     char title_buf[64];
@@ -944,22 +954,50 @@ static void draw_win_editor(const struct gui_win *w) {
 }
 
 static void draw_win_term(const struct gui_win *w, bool is_active) {
-    int32_t cx = w->x + 10;
-    int32_t cy = w->y + GUI_TITLEBAR_H + 6;
-    int32_t cw = w->w - 20;
+    int32_t cx = w->x + 8;
+    int32_t cy = w->y + GUI_TITLEBAR_H + 4;
+    int32_t cw = w->w - 16;
 
-    /* Quick-action toolbar */
-    static const char *const qlabels[6] = { "Clear", "ls -l", "ps", "gcc", "calc", "el0" };
+    /* 1. Authentic FulmenOS TUI HUD Header Bar */
+    uint32_t hud_bg = 0x001E293BU;
+    uint32_t hud_fg = 0x0038BDF8U;
+    uint32_t hud_line = 0x00334155U;
+    gui_fill_rect(cx, cy, cw, 22, hud_bg);
+    gui_fill_rect(cx, cy + 21, cw, 1, hud_line);
+
+    struct pmm_stats ps;
+    pmm_get_stats(&ps);
+    uint64_t used_mb = (ps.used_pages * PAGE_SIZE) / (1024UL * 1024UL);
+    uint64_t total_mb = (ps.total_pages * PAGE_SIZE) / (1024UL * 1024UL);
+
+    char hud_text[128];
+    snprintf(hud_text, sizeof(hud_text),
+             " FULMEN OS AArch64 | EL1 | Sched: %-4s | Ticks: %-5lu | RAM: %lu/%lu MB",
+             sched_policy_name(sched_get_policy()),
+             timer_get_ticks(),
+             used_mb, total_mb);
+    gui_draw_text_fit(cx + 4, cy + 3, (cw - 8) / 8, hud_text, hud_fg, hud_bg, false);
+
+    /* 2. Quick-action Action Buttons Bar */
+    int32_t by = cy + 24;
+    static const char *const qlabels[6] = { "clear", "ls -l", "ps", "gcc", "calc", "el0" };
     int32_t bw = (cw - 20) / 6;
     for (int i = 0; i < 6; i++) {
-        gui_draw_mac_button(cx + i * (bw + 4), cy, bw, 20, qlabels[i], false);
+        gui_draw_bevel_box(cx + i * (bw + 4), by, bw, 20, 0x001E293BU, false);
+        int32_t qlen = (int32_t)strlen(qlabels[i]);
+        int32_t qmax = (bw - 6) / 8;
+        if (qlen > qmax) qlen = qmax;
+        int32_t qx = cx + i * (bw + 4) + (bw - qlen * 8) / 2;
+        gui_draw_text_fit(qx, by + 2, qlen, qlabels[i], 0x0038BDF8U, 0x001E293BU, false);
     }
 
-    /* Terminal output box */
-    int32_t ty = cy + 25;
-    int32_t th = (w->y + w->h - 32) - ty;
-    if (th < 32) th = 32;
-    gui_draw_bevel_box(cx, ty, cw, th, MAC_TERM_BG, true);
+    /* 3. Terminal Canvas Body */
+    int32_t ty = by + 24;
+    int32_t prompt_h = 24;
+    int32_t th = (w->y + w->h - 8 - prompt_h) - ty;
+    if (th < 40) th = 40;
+    gui_fill_rect(cx, ty, cw, th, 0x0010141BU);
+    gui_outline(cx, ty, cw, th, 0x00334155U);
 
     int32_t cols = (cw - 12) / 8;
     int32_t rows = (th - 6) / 16;
@@ -997,28 +1035,57 @@ static void draw_win_term(const struct gui_win *w, bool is_active) {
             if (len >= sizeof(rbuf)) len = sizeof(rbuf) - 1U;
             memcpy(rbuf, gui_term_buf + lstart[idx], len);
             rbuf[len] = '\0';
-            uint32_t fg = (strstr(rbuf, "[PASS]") || strstr(rbuf, "[gcc]") || strstr(rbuf, "[g++]")) ? MAC_TERM_GREEN
-                        : (strstr(rbuf, "Error") || strstr(rbuf, "error:") || strstr(rbuf, "FAIL")) ? MAC_TERM_RED
-                        : (rbuf[0] == '$') ? MAC_TERM_CYAN
-                        : (strstr(rbuf, "[Mini-C]")) ? MAC_TERM_AMBER
-                        : MAC_TERM_FG;
-            gui_draw_text_fit(cx + 6, ry, cols, rbuf, fg, MAC_TERM_BG, true);
+            uint32_t fg = (strstr(rbuf, "[PASS]") || strstr(rbuf, "[gcc]") || strstr(rbuf, "[g++]") || strstr(rbuf, "[EL0")) ? 0x004ADE80U
+                        : (strstr(rbuf, "Error") || strstr(rbuf, "error:") || strstr(rbuf, "FAIL") || strstr(rbuf, "fault")) ? 0x00F87171U
+                        : (rbuf[0] == '$') ? 0x0038BDF8U
+                        : (strstr(rbuf, "[Mini-C]")) ? 0x00FACC15U
+                        : 0x00E5E9F0U;
+            gui_draw_text_fit(cx + 6, ry, cols, rbuf, fg, 0x0010141BU, true);
         } else {
-            gui_draw_text_fit(cx + 6, ry, cols, "", MAC_TERM_FG, MAC_TERM_BG, true);
+            gui_draw_text_fit(cx + 6, ry, cols, "", 0x00E5E9F0U, 0x0010141BU, true);
         }
     }
 
-    /* Command input line */
-    int32_t iy = w->y + w->h - 28;
-    gui_draw_bevel_box(cx, iy, cw, 22, MAC_WHITE, true);
-    char prompt[GUI_CMD_MAX + 8U];
-    int32_t pcols = (cw - 10) / 8;
+    /* 4. Terminal Prompt Line - Identical to FulmenOS TUI CLI */
+    int32_t iy = ty + th + 3;
+    gui_fill_rect(cx, iy, cw, 22, 0x0010141BU);
+    gui_outline(cx, iy, cw, 22, 0x00334155U);
+
+    char cwd_path[VFS_PATH_MAX];
+    vfs_get_path(vfs_get_cwd(), cwd_path, sizeof(cwd_path));
+    if (!cwd_path[0]) strcpy(cwd_path, "/home");
+
+    int32_t px = cx + 6;
+    /* 'root@fulmen' in ANSI_GREEN */
+    gui_draw_text_fit(px, iy + 3, 11, "root@fulmen", 0x004ADE80U, 0x0010141BU, false);
+    px += 11 * 8;
+    /* ':' */
+    gui_draw_text_fit(px, iy + 3, 1, ":", 0x00E5E9F0U, 0x0010141BU, false);
+    px += 8;
+    /* cwd in ANSI_BLUE */
+    int32_t cwd_len = (int32_t)strlen(cwd_path);
+    gui_draw_text_fit(px, iy + 3, cwd_len, cwd_path, 0x0060A5FAU, 0x0010141BU, false);
+    px += cwd_len * 8;
+    /* '# ' in white */
+    gui_draw_text_fit(px, iy + 3, 2, "# ", 0x00FFFFFFU, 0x0010141BU, false);
+    px += 16;
+
+    /* Typed command */
+    int32_t avail_cols = (cx + cw - 16 - px) / 8;
+    if (avail_cols < 4) avail_cols = 4;
     size_t show_off = 0;
-    if ((int32_t)cmd_len + 4 > pcols && pcols > 6) {
-        show_off = cmd_len + 4U - (size_t)pcols;
+    if ((int32_t)cmd_len > avail_cols) {
+        show_off = cmd_len - (size_t)avail_cols;
     }
-    snprintf(prompt, sizeof(prompt), "# %s%s", cmd_buf + show_off, is_active ? "_" : "");
-    gui_draw_text_fit(cx + 5, iy + 3, pcols, prompt, MAC_BLACK, MAC_WHITE, true);
+    gui_draw_text_fit(px, iy + 3, avail_cols, cmd_buf + show_off, 0x00FFFFFFU, 0x0010141BU, false);
+
+    /* Solid cyan block cursor */
+    if (is_active) {
+        int32_t cur_x = px + ((int32_t)cmd_len - (int32_t)show_off) * 8;
+        if (cur_x + 8 <= cx + cw - 4) {
+            gui_fill_rect(cur_x, iy + 4, 8, 14, 0x0038BDF8U);
+        }
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1034,9 +1101,9 @@ struct menu_def {
 
 static const struct menu_def mac_menus[5] = {
     { "[*]",     6,   34, 4, { "About FulmenOS...", "Run EL0 Trap Test", "Run Deadlock Test", "Shut Down     ^Q" } },
-    { "File",    42,  48, 6, { "New C Program", "New C++ Program", "Open Finder", "Open CodePad", "Save CodePad  ^S", "Delete Selected" } },
+    { "File",    42,  48, 6, { "Open Terminal", "Open Finder", "Open CodePad", "New C Program", "New C++ Program", "Close Window  ^W" } },
     { "Edit",    92,  48, 4, { "Insert C Demo", "Insert C++ Demo", "Clear CodePad", "Clear Terminal" } },
-    { "View",    142, 48, 5, { "Show All Windows", "Reset Layout", "Theme: Mac Blue", "Theme: Sys7 Gray", "Theme: Bondi Teal" } },
+    { "View",    142, 48, 5, { "Show All Windows", "Close All Windows", "Theme: Mac Blue", "Theme: Sys7 Gray", "Theme: Bondi Teal" } },
     { "Special", 192, 70, 5, { "Compile & Run ^R", "Sched: MLFQ", "Sched: Round-Robin", "Sched: Priority", "Shut Down OS" } },
 };
 
@@ -1047,8 +1114,14 @@ static void gui_trigger_menu_item(int m, int item) {
         else if (item == 2) gui_run_shell_cmd("deadlock_test", true);
         else if (item == 3) { gui_run_shell_cmd("poweroff", false); }
     } else if (m == 1) { /* File */
-        if (item == 0 || item == 1) {
-            bool is_cpp = (item == 1);
+        if (item == 0) {
+            gui_focus_window(WIN_TERM);
+        } else if (item == 1) {
+            gui_focus_window(WIN_FINDER);
+        } else if (item == 2) {
+            gui_focus_window(WIN_EDITOR);
+        } else if (item == 3 || item == 4) {
+            bool is_cpp = (item == 4);
             char path[64];
             snprintf(path, sizeof(path), "/home/app%d.%s", new_file_seq++, is_cpp ? "cpp" : "c");
             const char *tpl = is_cpp
@@ -1058,14 +1131,9 @@ static void gui_trigger_menu_item(int m, int item) {
             editor_save();
             finder_dir_idx = 0;
             gui_focus_window(WIN_EDITOR);
-        } else if (item == 2) {
-            gui_focus_window(WIN_FINDER);
-        } else if (item == 3) {
-            gui_focus_window(WIN_EDITOR);
-        } else if (item == 4) {
-            editor_save();
         } else if (item == 5) {
-            finder_delete_selected(false);
+            int top = gui_top_visible_window();
+            if (top >= 0) wins[top].visible = false;
         }
     } else if (m == 2) { /* Edit */
         if (item == 0) {
@@ -1089,7 +1157,7 @@ static void gui_trigger_menu_item(int m, int item) {
         if (item == 0) {
             for (int i = 0; i < WIN_COUNT; i++) wins[i].visible = true;
         } else if (item == 1) {
-            gui_reset_layout();
+            for (int i = 0; i < WIN_COUNT; i++) wins[i].visible = false;
         } else if (item >= 2 && item <= 4) {
             active_theme = item - 2;
         }
@@ -1309,30 +1377,45 @@ static void handle_editor_click(const struct gui_win *w, int32_t mx, int32_t my)
 }
 
 static void handle_term_click(const struct gui_win *w, int32_t mx, int32_t my) {
-    int32_t cx = w->x + 10;
-    int32_t cy = w->y + GUI_TITLEBAR_H + 6;
-    int32_t cw = w->w - 20;
+    int32_t cx = w->x + 8;
+    int32_t cy = w->y + GUI_TITLEBAR_H + 4;
+    int32_t cw = w->w - 16;
+    int32_t by = cy + 24;
     int32_t bw = (cw - 20) / 6;
 
     static const char *const qcmds[6] = {
-        "clear", "ls -l", "ps", "gcc /src/demo.c", "calc", "el0_test"
+        "clear", "ls -l", "ps", "gcc", "calc", "el0_test"
     };
     for (int i = 0; i < 6; i++) {
-        if (pt_in_rect(mx, my, cx + i * (bw + 4), cy, bw, 20)) {
+        if (pt_in_rect(mx, my, cx + i * (bw + 4), by, bw, 20)) {
             gui_run_shell_cmd(qcmds[i], true);
             return;
         }
     }
 }
 
-static void handle_desktop_icon_click(int icon_idx) {
-    selected_icon = icon_idx;
+static int desktop_last_click_idx = -1;
+static uint64_t desktop_last_click_ms = 0;
+
+static void handle_desktop_icon_execute(int icon_idx) {
     if (icon_idx == 0) gui_focus_window(WIN_FINDER);
     else if (icon_idx == 1) gui_focus_window(WIN_TERM);
     else if (icon_idx == 2) gui_focus_window(WIN_EDITOR);
     else if (icon_idx == 3) gui_focus_window(WIN_ABOUT);
     else if (icon_idx == 4) editor_compile_and_run();
     else if (icon_idx == 5) finder_delete_selected(true);
+}
+
+static void handle_desktop_icon_click(int icon_idx) {
+    uint64_t now = timer_get_ms();
+    bool dbl = (icon_idx == desktop_last_click_idx && (now - desktop_last_click_ms) < 700U);
+    selected_icon = icon_idx;
+    desktop_last_click_idx = icon_idx;
+    desktop_last_click_ms = now;
+
+    if (dbl) {
+        handle_desktop_icon_execute(icon_idx);
+    }
 }
 
 static void handle_gui_key(int ch, int *dragging_win) {
@@ -1489,6 +1572,23 @@ static void handle_gui_key(int ch, int *dragging_win) {
         return;
     }
 
+    if (top < 0) {
+        if (arrow == 1) {
+            if (selected_icon > 0) selected_icon--;
+            else selected_icon = 5;
+        } else if (arrow == 2) {
+            if (selected_icon >= 0 && selected_icon < 5) selected_icon++;
+            else selected_icon = 0;
+        } else if (ch == '\t') {
+            selected_icon = (selected_icon + 1) % 6;
+        } else if (ch == '\r' || ch == '\n') {
+            if (selected_icon >= 0 && selected_icon < 6) {
+                handle_desktop_icon_execute(selected_icon);
+            }
+        }
+        return;
+    }
+
     /* When About Mac is active, numeric/Tab/Ctrl shortcuts still assist keyboard users */
     if (ch == '\t') {
         int next = (top + 1) % WIN_COUNT;
@@ -1631,33 +1731,41 @@ void cmd_gui(int argc, char **argv) {
                 }
 
                 if (hit_win >= 0) {
-                    bool was_top = (hit_win == gui_top_visible_window());
-                    gui_focus_window(hit_win);
                     struct gui_win *w = &wins[hit_win];
 
-                    if (was_top && pt_in_rect(ms.x, ms.y, w->x + 5, w->y + 3, 16, 15)) {
+                    if (pt_in_rect(ms.x, ms.y, w->x + 4, w->y + 2, 20, 16)) {
                         w->visible = false;
-                    } else if (was_top && pt_in_rect(ms.x, ms.y, w->x + w->w - 22, w->y + 3, 16, 15)) {
-                        gui_toggle_zoom(hit_win);
-                    } else if (ms.y < w->y + GUI_TITLEBAR_H) {
-                        dragging_win = hit_win;
-                        drag_off_x = ms.x - w->x;
-                        drag_off_y = ms.y - w->y;
+                        if (dragging_win == hit_win) dragging_win = -1;
                     } else {
-                        if (hit_win == WIN_ABOUT)       handle_about_click(w, ms.x, ms.y);
-                        else if (hit_win == WIN_FINDER) handle_finder_click(w, ms.x, ms.y);
-                        else if (hit_win == WIN_EDITOR) handle_editor_click(w, ms.x, ms.y);
-                        else if (hit_win == WIN_TERM)   handle_term_click(w, ms.x, ms.y);
+                        gui_focus_window(hit_win);
+                        if (pt_in_rect(ms.x, ms.y, w->x + w->w - 22, w->y + 2, 20, 16)) {
+                            gui_toggle_zoom(hit_win);
+                        } else if (ms.y < w->y + GUI_TITLEBAR_H) {
+                            dragging_win = hit_win;
+                            drag_off_x = ms.x - w->x;
+                            drag_off_y = ms.y - w->y;
+                        } else {
+                            if (hit_win == WIN_ABOUT)       handle_about_click(w, ms.x, ms.y);
+                            else if (hit_win == WIN_FINDER) handle_finder_click(w, ms.x, ms.y);
+                            else if (hit_win == WIN_EDITOR) handle_editor_click(w, ms.x, ms.y);
+                            else if (hit_win == WIN_TERM)   handle_term_click(w, ms.x, ms.y);
+                        }
                     }
                     dirty = true;
                 } else {
                     /* 4. Desktop icon click */
-                    selected_icon = -1;
+                    int clicked_icon = -1;
                     for (int i = 0; i < 6; i++) {
                         if (pt_in_rect(ms.x, ms.y, desktop_icons[i].x, desktop_icons[i].y, 68, 56)) {
-                            handle_desktop_icon_click(i);
+                            clicked_icon = i;
                             break;
                         }
+                    }
+                    if (clicked_icon >= 0) {
+                        handle_desktop_icon_click(clicked_icon);
+                    } else {
+                        selected_icon = -1;
+                        desktop_last_click_idx = -1;
                     }
                     dirty = true;
                 }
