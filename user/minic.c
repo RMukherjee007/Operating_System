@@ -619,7 +619,8 @@ static void skip_balanced(struct mc_state *mc, enum tok_kind open_k, enum tok_ki
     }
 }
 
-static void skip_expr_branch(struct mc_state *mc, bool stop_on_colon) {
+/* A skipped logical operand ends before the next lower-precedence operator. */
+static void skip_expr_branch(struct mc_state *mc, enum tok_kind op) {
     int pdepth = 0;
     int tdepth = 0;
     while (peek(mc)->kind != TOK_EOF) {
@@ -630,12 +631,15 @@ static void skip_expr_branch(struct mc_state *mc, bool stop_on_colon) {
             if (pdepth == 0) break;
             pdepth--;
         } else if (pdepth == 0) {
+            if ((op == TOK_AND_AND && k == TOK_AND_AND) ||
+                ((op == TOK_AND_AND || op == TOK_OR_OR) &&
+                 (k == TOK_OR_OR || k == TOK_QUESTION))) break;
             if (k == TOK_QUESTION) {
                 tdepth++;
             } else if (k == TOK_COLON) {
-                if (stop_on_colon && tdepth == 0) break;
-                if (tdepth > 0) tdepth--;
-            } else if (!stop_on_colon && (k == TOK_SEMI || k == TOK_COMMA)) {
+                if (tdepth == 0) break;
+                tdepth--;
+            } else if (k == TOK_SEMI || k == TOK_COMMA) {
                 break;
             }
         }
@@ -1620,7 +1624,7 @@ static int64_t eval_logand(struct mc_state *mc) {
     int64_t v = eval_bitor(mc);
     while (match(mc, TOK_AND_AND)) {
         if (!v) {
-            skip_expr_branch(mc, false);
+            skip_expr_branch(mc, TOK_AND_AND);
             v = 0;
         } else {
             v = (v && eval_bitor(mc));
@@ -1635,7 +1639,7 @@ static int64_t eval_logor(struct mc_state *mc) {
     int64_t v = eval_logand(mc);
     while (match(mc, TOK_OR_OR)) {
         if (v) {
-            skip_expr_branch(mc, false);
+            skip_expr_branch(mc, TOK_OR_OR);
             v = 1;
         } else {
             v = (v || eval_logand(mc));
@@ -1659,9 +1663,9 @@ static int64_t eval_ternary(struct mc_state *mc) {
         res_str = mc->last_is_str;
         res_char = mc->last_is_char;
         expect(mc, TOK_COLON, "Expected ':' in ternary expression");
-        skip_expr_branch(mc, false);
+        skip_expr_branch(mc, TOK_COLON);
     } else {
-        skip_expr_branch(mc, true);
+        skip_expr_branch(mc, TOK_QUESTION);
         expect(mc, TOK_COLON, "Expected ':' in ternary expression");
         res = eval_expr(mc);
         res_str = mc->last_is_str;
@@ -2263,7 +2267,7 @@ static bool parse_class_def(struct mc_state *mc) {
                     match(mc, TOK_RBRACK);
                 }
                 if (match(mc, TOK_ASSIGN)) {
-                    skip_expr_branch(mc, false);
+                    skip_expr_branch(mc, TOK_ASSIGN);
                 }
             } while (match(mc, TOK_COMMA));
             expect(mc, TOK_SEMI, "Expected ';' after field declaration");

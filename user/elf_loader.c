@@ -33,7 +33,8 @@ int elf_run_from_vfs(const char *path, int argc, char **argv, int *exit_code) {
         eh->e_machine != EM_AARCH64) {
         return -EINVAL;
     }
-    if (eh->e_phoff + (uint64_t)eh->e_phnum * eh->e_phentsize > node->size) {
+    if (eh->e_phentsize != sizeof(Elf64_Phdr) || eh->e_phoff > node->size ||
+        eh->e_phnum > (node->size - eh->e_phoff) / sizeof(Elf64_Phdr)) {
         return -EINVAL;
     }
 
@@ -48,11 +49,13 @@ int elf_run_from_vfs(const char *path, int argc, char **argv, int *exit_code) {
         const Elf64_Phdr *ph = (const Elf64_Phdr *)(node->data + eh->e_phoff + i * eh->e_phentsize);
         if (ph->p_type != PT_LOAD) continue;
 
-        if (ph->p_vaddr < USER_ARENA_BASE || ph->p_vaddr + ph->p_memsz > stack_limit) {
+        if (ph->p_vaddr < USER_ARENA_BASE || ph->p_vaddr > stack_limit ||
+            ph->p_memsz > stack_limit - ph->p_vaddr) {
             kprintf(ANSI_RED "[ELF] Segment out of EL0 arena bounds (0x%lx)\n" ANSI_RESET, ph->p_vaddr);
             return -EACCES;
         }
-        if (ph->p_offset + ph->p_filesz > node->size) {
+        if (ph->p_filesz > ph->p_memsz || ph->p_offset > node->size ||
+            ph->p_filesz > node->size - ph->p_offset) {
             return -EINVAL;
         }
 

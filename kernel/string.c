@@ -269,9 +269,10 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap) {
                 bw_puts_padded(&w, numbuf, width, pad, left_align);
                 break;
             }
+            case 'o':
             case 'u': {
                 uint64_t uv = is_long ? va_arg(ap, uint64_t) : (uint64_t)va_arg(ap, unsigned int);
-                format_uint(uv, 10, false, numbuf);
+                format_uint(uv, (*fmt == 'o') ? 8 : 10, false, numbuf);
                 bw_puts_padded(&w, numbuf, width, pad, left_align);
                 break;
             }

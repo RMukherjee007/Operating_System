@@ -30,7 +30,7 @@ void heap_init(void) {
 }
 
 void *kmalloc(size_t size) {
-    if (size == 0) return NULL;
+    if (size == 0 || size > KERNEL_HEAP_SIZE - sizeof(struct heap_block)) return NULL;
     size = ALIGN_UP(size, 16);
 
     uint64_t flags = irq_save();
@@ -66,6 +66,7 @@ void *kmalloc(size_t size) {
 }
 
 void *kcalloc(size_t nmemb, size_t size) {
+    if (nmemb && size > KERNEL_HEAP_SIZE / nmemb) return NULL;
     size_t total = nmemb * size;
     void *ptr = kmalloc(total);
     if (ptr) memset(ptr, 0, total);

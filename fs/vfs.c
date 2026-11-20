@@ -57,17 +57,10 @@ static void detach_node(struct vfs_node *node) {
 
 static void free_node_recursive(struct vfs_node *node) {
     if (!node || node == root_node) return;
-    while (node->first_child) {
-        struct vfs_node *child = node->first_child;
-        detach_node(child);
-        free_node_recursive(child);
-    }
-    if (node->data) {
-        kfree(node->data);
-        node->data = NULL;
-    }
+    detach_node(node);
+    while (node->first_child) free_node_recursive(node->first_child);
+    kfree(node->data);
     memset(node, 0, sizeof(*node));
-    node->type = VFS_UNUSED;
 }
 
 void vfs_init(void) {
@@ -88,16 +81,10 @@ struct vfs_node *vfs_get_cwd(void) {
 
 void vfs_get_path(const struct vfs_node *node, char *buf, size_t buf_size) {
     if (!buf || buf_size == 0) return;
-    if (!node || node == root_node) {
-        strncpy(buf, "/", buf_size - 1);
-        buf[buf_size - 1] = '\0';
-        return;
-    }
-
-    const struct vfs_node *stack[32];
+    const struct vfs_node *stack[VFS_MAX_NODES];
     int depth = 0;
     const struct vfs_node *cur = node;
-    while (cur && cur != root_node && depth < 32) {
+    while (cur && cur != root_node) {
         stack[depth++] = cur;
         cur = cur->parent;
     }
@@ -108,15 +95,14 @@ void vfs_get_path(const struct vfs_node *node, char *buf, size_t buf_size) {
         strcat(buf, "/");
         strcat(buf, stack[i]->name);
     }
-    if (buf[0] == '\0') strcpy(buf, "/");
+    if (buf[0] == '\0' && buf_size > 1) strcpy(buf, "/");
 }
 
 static bool split_parent(const char *path, struct vfs_node **out_parent, char *out_name) {
-    if (!path || !*path) return false;
+    if (!path || !*path || strnlen(path, VFS_PATH_MAX) == VFS_PATH_MAX) return false;
 
     char copy[VFS_PATH_MAX];
-    strncpy(copy, path, sizeof(copy) - 1);
-    copy[sizeof(copy) - 1] = '\0';
+    strcpy(copy, path);
 
     size_t len = strlen(copy);
     while (len > 1 && copy[len - 1] == '/') {
@@ -143,17 +129,17 @@ static bool split_parent(const char *path, struct vfs_node **out_parent, char *o
     if (!parent || parent->type != VFS_DIR) return false;
     if (!*leaf || strcmp(leaf, ".") == 0 || strcmp(leaf, "..") == 0) return false;
 
-    strncpy(out_name, leaf, VFS_NAME_MAX - 1);
-    out_name[VFS_NAME_MAX - 1] = '\0';
+    if (strlen(leaf) >= VFS_NAME_MAX) return false;
+    strcpy(out_name, leaf);
     *out_parent = parent;
     return true;
 }
 
 struct vfs_node *vfs_resolve(const char *path) {
     if (!path || !*path) return cwd_node;
+    if (strnlen(path, VFS_PATH_MAX) == VFS_PATH_MAX) return NULL;
     char copy[VFS_PATH_MAX];
-    strncpy(copy, path, sizeof(copy) - 1);
-    copy[sizeof(copy) - 1] = '\0';
+    strcpy(copy, path);
 
     struct vfs_node *cur = (copy[0] == '/') ? root_node : cwd_node;
     char *p = copy;
@@ -202,38 +188,51 @@ struct vfs_node *vfs_touch(const char *path) {
     return alloc_node(name, VFS_FILE, parent);
 }
 
-int vfs_write(const char *path, const void *data, size_t size, bool append) {
-    struct vfs_node *n = vfs_resolve(path);
-    if (!n) {
-        n = vfs_touch(path);
-        if (!n) return -ENOSPC;
-    }
+static int write_file(struct vfs_node *n, const void *data, size_t size, bool append) {
     if (n->type != VFS_FILE) return -EISDIR;
 
     size_t offset = append ? n->size : 0;
+    if (size > (size_t)-1 - offset) return -ENOMEM;
     size_t needed = offset + size;
+    uint8_t *buf = n->data;
 
-    if (needed > n->capacity) {
+    if (needed && needed >= n->capacity) {
+        if (needed > (size_t)-1 - 127) return -ENOMEM;
         size_t new_cap = ALIGN_UP(needed + 64, 64);
-        uint8_t *new_buf = (uint8_t *)kmalloc(new_cap);
-        if (!new_buf) return -ENOMEM;
-        if (n->data && offset > 0) {
-            memcpy(new_buf, n->data, offset);
-        }
-        if (n->data) kfree(n->data);
-        n->data = new_buf;
+        buf = kmalloc(new_cap);
+        if (!buf) return -ENOMEM;
+        if (offset) memcpy(buf, n->data, offset);
         n->capacity = new_cap;
     }
 
     if (size > 0 && data) {
-        memcpy(n->data + offset, data, size);
+        memmove(buf + offset, data, size);
     }
+    if (buf != n->data) kfree(n->data);
+    n->data = buf;
     n->size = needed;
-    if (n->data && n->size < n->capacity) {
+    if (n->data) {
         n->data[n->size] = '\0';
     }
     n->modified_tick = timer_get_ticks();
     return 0;
+}
+
+static int create_file(struct vfs_node *parent, const char *name, const void *data, size_t size) {
+    struct vfs_node *n = alloc_node(name, VFS_FILE, parent);
+    if (!n) return -ENOSPC;
+    int rc = write_file(n, data, size, false);
+    if (rc != 0) free_node_recursive(n);
+    return rc;
+}
+
+int vfs_write(const char *path, const void *data, size_t size, bool append) {
+    struct vfs_node *n = vfs_resolve(path);
+    if (n) return write_file(n, data, size, append);
+    struct vfs_node *parent;
+    char name[VFS_NAME_MAX];
+    if (!split_parent(path, &parent, name)) return -ENOSPC;
+    return create_file(parent, name, data, size);
 }
 
 ssize_t vfs_read(const char *path, void *buf, size_t max_size) {
@@ -248,15 +247,19 @@ ssize_t vfs_read(const char *path, void *buf, size_t max_size) {
     return (ssize_t)to_copy;
 }
 
+static bool is_ancestor(const struct vfs_node *ancestor, const struct vfs_node *node) {
+    while (node != root_node && node != ancestor) node = node->parent;
+    return node == ancestor;
+}
+
 int vfs_remove(const char *path, bool recursive) {
     struct vfs_node *n = vfs_resolve(path);
     if (!n) return -ENOENT;
     if (n == root_node) return -EPERM;
-    if (n == cwd_node) return -EBUSY;
+    if (is_ancestor(n, cwd_node)) return -EBUSY;
     if (n->type == VFS_DIR && n->first_child != NULL && !recursive) {
         return -ENOTEMPTY;
     }
-    detach_node(n);
     free_node_recursive(n);
     return 0;
 }
@@ -268,11 +271,9 @@ int vfs_copy(const char *src_path, const char *dst_path) {
 
     struct vfs_node *dst = vfs_resolve(dst_path);
     if (dst && dst->type == VFS_DIR) {
-        char full[VFS_PATH_MAX];
-        vfs_get_path(dst, full, sizeof(full));
-        if (strcmp(full, "/") != 0) strcat(full, "/");
-        strcat(full, src->name);
-        return vfs_write(full, src->data, src->size, false);
+        struct vfs_node *child = find_child(dst, src->name);
+        if (child) return write_file(child, src->data, src->size, false);
+        return create_file(dst, src->name, src->data, src->size);
     }
     return vfs_write(dst_path, src->data, src->size, false);
 }
@@ -283,24 +284,24 @@ int vfs_move(const char *src_path, const char *dst_path) {
     if (src == root_node || src == cwd_node) return -EBUSY;
 
     struct vfs_node *dst = vfs_resolve(dst_path);
-    if (dst && dst->type == VFS_DIR) {
-        detach_node(src);
-        src->parent = dst;
-        src->next_sibling = dst->first_child;
-        dst->first_child = src;
-        return 0;
-    }
-
     struct vfs_node *new_parent = NULL;
     char new_name[VFS_NAME_MAX];
-    if (!split_parent(dst_path, &new_parent, new_name)) return -EINVAL;
-
-    if (dst && dst->type == VFS_FILE) {
-        vfs_remove(dst_path, false);
+    if (dst && dst->type == VFS_DIR) {
+        new_parent = dst;
+        strcpy(new_name, src->name);
+        dst = find_child(new_parent, new_name);
+    } else if (!split_parent(dst_path, &new_parent, new_name)) {
+        return -EINVAL;
+    }
+    if (is_ancestor(src, new_parent)) return -EINVAL;
+    if (src == dst) return 0;
+    if (dst) {
+        if (dst->type == VFS_DIR) return -EISDIR;
+        if (src->type == VFS_DIR) return -ENOTDIR;
+        free_node_recursive(dst);
     }
     detach_node(src);
-    strncpy(src->name, new_name, VFS_NAME_MAX - 1);
-    src->name[VFS_NAME_MAX - 1] = '\0';
+    strcpy(src->name, new_name);
     src->parent = new_parent;
     src->next_sibling = new_parent->first_child;
     new_parent->first_child = src;

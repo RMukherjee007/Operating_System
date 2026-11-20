@@ -1,5 +1,6 @@
 # Build directory and artifacts
 build/
+__pycache__/
 *.bin
 *.elf
 *.iso

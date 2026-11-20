@@ -38,14 +38,13 @@ OBJCOPY := aarch64-linux-gnu-objcopy
 
 CFLAGS  := -ffreestanding -fno-builtin -fno-stack-protector -nostdlib \
            -mgeneral-regs-only -mstrict-align -Wall -Wextra -Werror=implicit-function-declaration \
-           -O2 -Iinclude
+           -O2 -MMD -MP -Iinclude
 CXXFLAGS := $(CFLAGS) -fno-exceptions -fno-rtti -fno-use-cxa-atexit
-ASFLAGS := -ffreestanding -Iinclude
+ASFLAGS := -ffreestanding -MMD -MP -Iinclude
 LDFLAGS := -nostdlib --no-warn-rwx-segments -T linker.ld
 
-USER_CFLAGS   := -ffreestanding -fno-builtin -fno-stack-protector -nostdlib \
-                 -mgeneral-regs-only -mstrict-align -Wall -Wextra -O2 -Iinclude -Iuser
-USER_CXXFLAGS := $(USER_CFLAGS) -fno-exceptions -fno-rtti -fno-use-cxa-atexit
+USER_CFLAGS   := $(CFLAGS) -Iuser
+USER_CXXFLAGS := $(CXXFLAGS) -Iuser
 USER_LDFLAGS  := -nostdlib --no-warn-rwx-segments -T user_progs/user.ld
 
 BUILD_DIR := build
@@ -88,11 +87,9 @@ C_OBJS   := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 INITRD_C := $(BUILD_DIR)/initrd_data.c
 INITRD_O := $(BUILD_DIR)/initrd_data.o
 
-USER_ELFS := \
-	$(USER_BUILD)/hello.elf \
-	$(USER_BUILD)/fib.elf \
-	$(USER_BUILD)/primes.elf \
-	$(USER_BUILD)/calc.elf
+USER_C_OBJS := $(addprefix $(USER_BUILD)/,hello.o fib.o primes.o)
+USER_OBJS := $(USER_C_OBJS) $(USER_BUILD)/calc.o
+USER_ELFS := $(USER_OBJS:.o=.elf)
 
 KERNEL_ELF := $(BUILD_DIR)/fulmenos-qemu.elf
 KERNEL_BIN := $(BUILD_DIR)/fulmen.bin
@@ -100,38 +97,29 @@ GRUB_ISO   := $(BUILD_DIR)/fulmen-grub.iso
 
 build: $(KERNEL_ELF) $(KERNEL_BIN)
 
-$(BUILD_DIR)/%.o: %.S
+$(BUILD_DIR)/%.o: %.S Makefile
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: %.c
+$(BUILD_DIR)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # User-space EL0 runtime and ELF binaries
-$(USER_BUILD)/ulib.o: user/ulib.c
+$(USER_BUILD)/ulib.o: user/ulib.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(USER_BUILD)/hello.elf: user_progs/hello.c $(USER_BUILD)/ulib.o user_progs/user.ld
+$(USER_C_OBJS): $(USER_BUILD)/%.o: user_progs/%.c Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c $< -o $(USER_BUILD)/hello.o
-	$(LD) $(USER_LDFLAGS) $(USER_BUILD)/ulib.o $(USER_BUILD)/hello.o -o $@
+	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(USER_BUILD)/fib.elf: user_progs/fib.c $(USER_BUILD)/ulib.o user_progs/user.ld
+$(USER_BUILD)/calc.o: user_progs/calc.cpp Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c $< -o $(USER_BUILD)/fib.o
-	$(LD) $(USER_LDFLAGS) $(USER_BUILD)/ulib.o $(USER_BUILD)/fib.o -o $@
+	$(CXX) $(USER_CXXFLAGS) -c $< -o $@
 
-$(USER_BUILD)/primes.elf: user_progs/primes.c $(USER_BUILD)/ulib.o user_progs/user.ld
-	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c $< -o $(USER_BUILD)/primes.o
-	$(LD) $(USER_LDFLAGS) $(USER_BUILD)/ulib.o $(USER_BUILD)/primes.o -o $@
-
-$(USER_BUILD)/calc.elf: user_progs/calc.cpp $(USER_BUILD)/ulib.o user_progs/user.ld
-	@mkdir -p $(dir $@)
-	$(CXX) $(USER_CXXFLAGS) -c $< -o $(USER_BUILD)/calc.o
-	$(LD) $(USER_LDFLAGS) $(USER_BUILD)/ulib.o $(USER_BUILD)/calc.o -o $@
+$(USER_ELFS): $(USER_BUILD)/%.elf: $(USER_BUILD)/%.o $(USER_BUILD)/ulib.o user_progs/user.ld
+	$(LD) $(USER_LDFLAGS) $(USER_BUILD)/ulib.o $< -o $@
 
 # Pack ELF binaries and source code into RAM disk C payload
 $(INITRD_C): $(USER_ELFS) user_progs/hello.c user_progs/fib.c user_progs/primes.c user_progs/calc.cpp user_progs/demo.c scripts/pack_initrd.py
@@ -146,7 +134,7 @@ $(INITRD_C): $(USER_ELFS) user_progs/hello.c user_progs/fib.c user_progs/primes.
 		--entry /src/calc.cpp=user_progs/calc.cpp \
 		--entry /src/demo.c=user_progs/demo.c
 
-$(INITRD_O): $(INITRD_C)
+$(INITRD_O): $(INITRD_C) Makefile
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL_ELF): $(ASM_OBJS) $(C_OBJS) $(INITRD_O) linker.ld
@@ -205,6 +193,8 @@ vm-setup:
 test: $(KERNEL_ELF) $(KERNEL_BIN)
 	python3 scripts/verify_os.py
 	python3 scripts/verify_gui.py
+
+-include $(ASM_OBJS:.o=.d) $(C_OBJS:.o=.d) $(USER_OBJS:.o=.d) $(USER_BUILD)/ulib.d $(INITRD_O:.o=.d)
 
 clean:
 	rm -rf $(BUILD_DIR)

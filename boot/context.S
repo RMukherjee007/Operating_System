@@ -3,7 +3,7 @@
 .section ".bss"
 .balign 16
 el0_return_ctx:
-    .skip 104
+    .skip 112
 
 .section ".text"
 .global cpu_switch_to
@@ -52,6 +52,9 @@ task_trampoline:
  * x0 = entry, x1 = user_sp, x2 = argc, x3 = argv
  */
 enter_el0:
+    /* An IRQ also uses ELR_EL1 and SPSR_EL1. Keep setup atomic until ERET. */
+    mrs     x11, daif
+    msr     daifset, #2
     adrp    x9, el0_return_ctx
     add     x9, x9, :lo12:el0_return_ctx
     stp     x19, x20, [x9, #0]
@@ -61,7 +64,7 @@ enter_el0:
     stp     x27, x28, [x9, #64]
     mov     x10, sp
     stp     x29, x10, [x9, #80]
-    str     x30,      [x9, #96]
+    stp     x30, x11, [x9, #96]
 
     /* Configure EL0t execution state (SPSR_EL1 = 0, IRQs enabled in EL0) */
     msr     elr_el1, x0
@@ -116,8 +119,6 @@ exit_el0:
     ldp     x27, x28, [x9, #64]
     ldp     x29, x10, [x9, #80]
     mov     sp, x10
-    ldr     x30,      [x9, #96]
-
-    /* Re-enable IRQs since we arrived via el0_sync trap */
-    msr     daifclr, #2
+    ldp     x30, x11, [x9, #96]
+    msr     daif, x11
     ret

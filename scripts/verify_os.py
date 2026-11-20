@@ -5,73 +5,14 @@ Drives the interactive UART shell over a PTY and validates all OS subsystems.
 """
 
 import os
-import pty
-import re
-import select
-import subprocess
-import sys
-import termios
-import time
-import tty
 
-ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-
-def strip_ansi(s: str) -> str:
-    return ANSI_RE.sub("", s)
-
-
-def read_until(master_fd: int, pattern: str, buf: list[str], timeout: float = 10.0) -> str:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        text = strip_ansi("".join(buf))
-        if pattern in text:
-            return text
-        rlist, _, _ = select.select([master_fd], [], [], 0.1)
-        if master_fd in rlist:
-            try:
-                chunk = os.read(master_fd, 4096)
-            except OSError:
-                break
-            if not chunk:
-                break
-            decoded = chunk.decode("utf-8", errors="replace")
-            sys.stdout.write(decoded)
-            sys.stdout.flush()
-            buf.append(decoded)
-    raise TimeoutError(f"Timed out waiting for pattern: {pattern!r}")
+from qemu_test import boot_qemu, read_until
 
 
 def main() -> int:
-    master_fd, slave_fd = pty.openpty()
-    tty.setraw(slave_fd, termios.TCSANOW)
-    cmd = [
-        "qemu-system-aarch64",
-        "-M", "virt,gic-version=2",
-        "-cpu", "cortex-a72",
-        "-m", "256M",
-        "-nic", "none",
-        "-kernel", "build/fulmenos-qemu.elf",
-        "-display", "none",
-        "-device", "ramfb",
-        "-serial", "stdio",
-    ]
-    proc = subprocess.Popen(
-        cmd,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=subprocess.STDOUT,
-        close_fds=True,
-    )
-    os.close(slave_fd)
-
-    buf: list[str] = []
     prompt = "root@fulmen:"
-
-    try:
-        read_until(master_fd, prompt, buf, timeout=15.0)
-        buf.clear()
-
+    with boot_qemu() as (master_fd, proc):
+        read_until(master_fd, prompt)
         commands = [
             ("uname -a", "FulmenOS fulmen 1.0.0"),
             ("ls -l /", "bin/"),
@@ -102,10 +43,26 @@ def main() -> int:
                 None,
             ),
             ("cc /home/live.c", "Cube of 5 is 125"),
+            ("write /tmp/logic.c 'int main() { int n = 0; int a = 0 && ++n || 1; int b = 1 || ++n ? 7 : 9; return a + b + n; }'", None),
+            ("cc /tmp/logic.c", "exited with status 8"),
             ("mkdir /home/testdir", None),
             ("cp /etc/os-release /home/testdir/os.txt", None),
-            ("grep FulmenOS /home/testdir/os.txt", "FulmenOS"),
-            ("wc /home/testdir/os.txt", "/home/testdir/os.txt"),
+            ("mv /home/testdir/os.txt /home/testdir/./os.txt", None),
+            ("grep FulmenOS /home/testdir/os.txt", 'NAME="FulmenOS"'),
+            ("stat /home/testdir/os.txt", "Mode: 0644"),
+            ("mkdir /home/testdir/sub", None),
+            ("mv /home/testdir /home/testdir/sub", "mv: failed"),
+            ("cd /home/testdir/sub", None),
+            ("rm -r /home/testdir", "(err=-16)"),
+            ("cp /etc/os-release .", None),
+            ("cat os-release", 'NAME="FulmenOS"'),
+            ("write os.txt replacement", None),
+            ("mv ../os.txt .", None),
+            ("cat os.txt", 'NAME="FulmenOS"'),
+            ("rm os.txt", None),
+            ("stat os.txt", "not found"),
+            ("cd /home", None),
+            ("wc /home/testdir/sub/os-release", "/home/testdir/sub/os-release"),
             ("rm -r /home/testdir", None),
             ("ps", "shell"),
             ("free", "Phys RAM:"),
@@ -114,16 +71,14 @@ def main() -> int:
         ]
 
         for line, expected in commands:
-            buf.clear()
             os.write(master_fd, (line + "\n").encode("utf-8"))
-            output = read_until(master_fd, prompt, buf, timeout=15.0)
+            output = read_until(master_fd, prompt).partition("\n")[2]
             if expected and expected not in output:
                 raise AssertionError(
                     f"Command {line!r} did not produce expected substring {expected!r}"
                 )
 
         # Clean poweroff
-        buf.clear()
         os.write(master_fd, b"poweroff\n")
         rc = proc.wait(timeout=10.0)
         if rc != 0:
@@ -132,16 +87,6 @@ def main() -> int:
         print("\n\n=== ALL FULMENOS VERIFICATION CHECKS PASSED ===")
         return 0
 
-    except Exception as exc:
-        print(f"\n[VERIFY ERROR] {exc}", file=sys.stderr)
-        proc.kill()
-        return 1
-    finally:
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
